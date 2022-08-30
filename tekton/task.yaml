@@ -1,0 +1,25 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: cachito
+spec:
+  params:
+  - description: The Git repository URL
+    name: REPO_URL
+    type: string
+  - description: The Git commit ref
+    name: REF
+    type: string
+  steps:
+  - image: quay.io/bpimente/cachi2:poc
+    name: fetch-dependencies
+    resources:
+      limits:
+        memory: 4Gi
+        cpu: 2
+      requests:
+        memory: 512Mi
+        cpu: 10m
+    args: ["--url", "$(params.REPO_URL)", "--ref", "$(params.REF)", "--workdir", "$(workspaces.source.path)"]
+  workspaces:
+  - name: source
