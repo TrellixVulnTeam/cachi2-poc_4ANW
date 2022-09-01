@@ -17,7 +17,6 @@ parser.add_argument("--workdir", type=str)
 parser.add_argument("--use-existing-source", type=str, default="")
 
 args = parser.parse_args()
-print(args.workdir)
 
 work_dir = os.path.abspath(args.workdir)
 set_worker_config(work_dir)
@@ -35,7 +34,5 @@ else:
         ref=args.ref,
         source_dir=args.use_existing_source
     )
-
-print(request.source_dir)
 
 fetch_gomod_source(request)
