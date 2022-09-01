@@ -44,7 +44,7 @@ def fetch_gomod_source(request, dep_replacements=None, package_configs=None):
     if package_configs is None:
         package_configs = []
 
-    bundle_dir: RequestBundleDir = RequestBundleDir(request.id)
+    bundle_dir: RequestBundleDir = RequestBundleDir(request.source_dir)
     subpaths = [os.path.normpath(c["path"]) for c in package_configs if c.get("path")]
 
     if not subpaths:
@@ -86,7 +86,7 @@ def fetch_gomod_source(request, dep_replacements=None, package_configs=None):
 
     for i, subpath in enumerate(subpaths):
         log.info(
-            "Fetching the gomod dependencies for request %d in subpath %s", request.id, subpath
+            "Fetching the gomod dependencies for request in subpath %s", subpath
         )
 
         # API code, remove
@@ -282,7 +282,7 @@ def _resolve_gomod(app_source_path, request, dep_replacements=None, git_dir_path
         )
         module = {"name": module_name, "type": "gomod", "version": module_version}
 
-        bundle_dir = RequestBundleDir(request.id)
+        bundle_dir = RequestBundleDir(request.source_dir)
 
         if "gomod-vendor" in flags:
             # Create an empty gomod cache in the bundle directory so that any Cachito

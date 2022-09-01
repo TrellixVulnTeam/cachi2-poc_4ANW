@@ -27,7 +27,7 @@ class BaseRequestBundleDir(base_path):
 
     go_mod_cache_download_part = Path("pkg", "mod", "cache", "download")
 
-    def __new__(cls, request_id, root, app_subpath=os.curdir):
+    def __new__(cls, root, source_dir, app_subpath=os.curdir):
         """
         Create a new Path object.
 
@@ -39,10 +39,9 @@ class BaseRequestBundleDir(base_path):
             the root of the source directory.
         """
         self = super().__new__(cls, root)
-        self._request_id = request_id
         self._path_root = root
 
-        self.source_root_dir = self.joinpath("app")
+        self.source_root_dir = self.joinpath(source_dir)
         self.source_dir = self.source_root_dir.joinpath(app_subpath)
         self.go_mod_file = self.source_dir.joinpath("go.mod")
 
@@ -61,10 +60,10 @@ class BaseRequestBundleDir(base_path):
 
         self.yarn_deps_dir = self.joinpath("deps", "yarn")
 
-        self.bundle_archive_file = Path(root, f"{request_id}.tar.gz")
-        self.bundle_archive_checksum = Path(root, f"{request_id}.checksum.sha256")
+        self.bundle_archive_file = Path(root, f"bundle.tar.gz")
+        self.bundle_archive_checksum = Path(root, f"bundle.checksum.sha256")
 
-        self.packages_data = Path(root, f"{request_id}-packages.json")
+        self.packages_data = Path(root, f"packages.json")
         self.gomod_packages_data = self.joinpath("gomod_packages.json")
         self.npm_packages_data = self.joinpath("npm_packages.json")
         self.pip_packages_data = self.joinpath("pip_packages.json")
@@ -76,7 +75,7 @@ class BaseRequestBundleDir(base_path):
 
     def app_subpath(self, subpath):
         """Create a new ``RequestBundleDir`` object with the sources pointed to the subpath."""
-        return BaseRequestBundleDir(self._request_id, self._path_root, subpath)
+        return BaseRequestBundleDir(self._path_root, self.source_dir, subpath)
 
     def relpath(self, path):
         """Get the relative path of a path from the root of the source directory."""
@@ -99,10 +98,10 @@ class RequestBundleDir(BaseRequestBundleDir):
     :param int request_id: the request ID.
     """
 
-    def __new__(cls, request_id):
+    def __new__(cls, source_dir):
         """Create a new Path object."""
         root_dir = get_worker_config().cachito_bundles_dir
-        self = super().__new__(cls, request_id, root_dir)
+        self = super().__new__(cls, root_dir, source_dir)
 
         log.debug("Ensure directory %s exists.", self)
         log.debug("Ensure directory %s exists.", self.deps_dir)

@@ -45,7 +45,7 @@ def fetch_app_source(request, gitsubmodule=False, remove_unsafe_symlinks=False):
     # Extract the archive contents to the temporary directory of where the bundle is being created.
     # This will eventually end up in the bundle the user downloads. This is extracted now since
     # some package managers may add dependency replacements, which require edits to source files.
-    bundle_dir = RequestBundleDir(request.id)
+    bundle_dir = RequestBundleDir(request.source_dir)
     log.debug("Extracting %s to %s", scm.sources_dir.archive_path, bundle_dir)
     shutil.unpack_archive(str(scm.sources_dir.archive_path), str(bundle_dir))
     _enforce_sandbox(bundle_dir.source_root_dir, remove_unsafe_symlinks)

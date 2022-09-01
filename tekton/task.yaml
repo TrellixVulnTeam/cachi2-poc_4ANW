@@ -5,11 +5,15 @@ metadata:
 spec:
   params:
   - description: The Git repository URL
-    name: REPO_URL
+    name: url
     type: string
   - description: The Git commit ref
-    name: REF
+    name: revision
     type: string
+  - description: The path for the source code, in case it was already downloaded
+    name: sources-path
+    type: string
+    default: ""
   steps:
   - image: quay.io/bpimente/cachi2:poc
     name: fetch-dependencies
@@ -20,6 +24,11 @@ spec:
       requests:
         memory: 512Mi
         cpu: 10m
-    args: ["--url", "$(params.REPO_URL)", "--ref", "$(params.REF)", "--workdir", "$(workspaces.source.path)"]
+    args: [
+      "--url", "$(params.url)",
+      "--ref", "$(params.revision)",
+      "--workdir", "$(workspaces.source.path)",
+      "--use-existing-source", "$(params.sources-path)",
+    ]
   workspaces:
   - name: source
