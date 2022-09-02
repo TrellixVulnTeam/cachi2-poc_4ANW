@@ -1,0 +1,66 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: go-build
+spec:
+  params:
+    - description: 'Source Repository URL'
+      name: git-url
+      type: string
+    - description: 'Revision of the Source Repository'
+      name: revision
+      type: string
+      default: ""
+    - description: 'Fully Qualified Output Image'
+      name: output-image
+      type: string
+    - description: The path to your source code
+      name: path-context
+      type: string
+      default: .
+    - description: Path to the Dockerfile
+      name: dockerfile
+      type: string
+      default: Dockerfile
+  tasks:
+    - name: clone-repository
+      params:
+        - name: url
+          value: "$(params.git-url)"
+        - name: revision
+          value: "$(params.revision)"
+      taskRef:
+        bundle: quay.io/redhat-appstudio/appstudio-tasks:510fa6e99f1fa1f816c96354bbaf1ad155c6d9c3-1
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: workspace
+        - name: basic-auth
+          workspace: git-auth
+    - name: pre-fetch-dependencies
+      params:
+        - name: url
+          value: "$(params.git-url)"
+        - name: revision
+          value: "$(params.revision)"
+        - name: sources-path
+          value: "."
+      taskRef:
+        bundle: quay.io/bpimente/cachi2:task-bundle
+        name: cachito
+      runAfter:
+        - clone-repository
+      workspaces:
+        - name: source
+          workspace: workspace
+  results:
+    - name: CHAINS-GIT_URL
+      value: "$(tasks.clone-repository.results.url)"
+    - name: CHAINS-GIT_COMMIT
+      value: "$(tasks.clone-repository.results.commit)"
+  workspaces:
+    - name: workspace
+    - name: registry-auth
+      optional: true
+    - name: git-auth
+      optional: true
