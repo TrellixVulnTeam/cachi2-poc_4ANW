@@ -49,6 +49,7 @@ def load_json_stream(s: str) -> Iterator:
     The objects can be separated by one or more whitespace characters. The return value is
     a generator that will yield the parsed objects one by one.
     """
+    print(s)
     decoder = json.JSONDecoder()
     non_whitespace = re.compile(r"\S")
     i = 0
