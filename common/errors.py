@@ -72,3 +72,15 @@ class GoModError(Exception):
     """Go mod related error. A module can't be downloaded by go mod download command."""
 
     pass
+
+
+class UnsupportedFeature(ClientError):
+    """Unsupported feature."""
+
+    pass
+
+
+class InvalidFileFormat(ClientError):
+    """Invalid file format."""
+
+    pass

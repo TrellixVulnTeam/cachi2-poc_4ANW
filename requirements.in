@@ -2,3 +2,4 @@ backoff
 gitpython
 requests
 semver
+pytest

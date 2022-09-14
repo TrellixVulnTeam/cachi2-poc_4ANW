@@ -1,4 +1,5 @@
 import functools
+import fnmatch
 import logging
 import os
 import re
@@ -13,7 +14,15 @@ import git
 import semver
 
 from common.config import get_worker_config
-from common.errors import GoModError, CachitoCalledProcessError
+from common.errors import (
+    CachitoCalledProcessError,
+    FileAccessError,
+    InvalidFileFormat,
+    GoModError,
+    RepositoryAccessError,
+    UnsupportedFeature,
+    ValidationError,
+)
 from common.paths import RequestBundleDir
 from common.packages_data import PackagesData
 from common.utils import run_cmd, load_json_stream
@@ -134,6 +143,7 @@ def _find_missing_gomod_files(bundle_dir, subpaths):
     :return: a list containing all non-existing go.mod files across subpaths
     :rtype: list
     """
+    breakpoint()
     invalid_gomod_files = []
     for subpath in subpaths:
         bundle_dir_subpath = bundle_dir.app_subpath(subpath)
@@ -783,7 +793,7 @@ def _set_full_local_dep_relpaths(pkg_deps: List[dict], main_module_deps: List[di
             continue
 
         # The gomod module that contains this go-package dependency
-        dep_module_name = match_parent_module(dep_name, locally_replaced_mod_names)
+        dep_module_name = _match_parent_module(dep_name, locally_replaced_mod_names)
         if dep_module_name is None:
             # This should be impossible
             raise RuntimeError(f"Could not find parent Go module for local dependency: {dep_name}")
@@ -868,3 +878,160 @@ def _get_semantic_version_from_tag(tag_name, subpath=None):
         semantic_version = tag_name[1:]
 
     return semver.VersionInfo.parse(semantic_version)
+
+def _module_lines_from_modules_txt(app_dir: str) -> List[str]:
+    """
+    Read module lines from vendor/modules.txt.
+
+    Exclude modules that do not have any packages, as those will not actually be downloaded by
+    go mod vendor.
+
+    Note that vendor/modules.txt is fully managed by go. After you call go mod vendor, this file
+    is guaranteed to contain only the content written in it by go.
+    """
+    modules_txt = Path(app_dir) / "vendor" / "modules.txt"
+    module_lines: List[str] = []
+    has_packages = {}
+
+    log.debug("Parsing modules from vendor/modules.txt")
+
+    for line in modules_txt.read_text().splitlines():
+        # modules.txt contains lines in one of 4 formats:
+        #   1) # <module_name> <version> [=> <replace>]
+        #   2) ## <markers>
+        #   3) <package_name>
+        #   4) # <module_name> => <replace>
+
+        # the lines always appear in the order of 1, 2, 3 (2 and 3 are optional)
+        # 4 can only appear at the end of the file and is never followed by package lines (3)
+        # see https://github.com/golang/go/blob/master/src/cmd/go/internal/modcmd/vendor.go
+
+        if not line.startswith("#"):  # this is a package line
+            if not module_lines:
+                raise FileAccessError(f"vendor/modules.txt: package has no parent module: {line}")
+            has_packages[module_lines[-1]] = True
+        elif line.startswith("# "):  # this is a module line or a wildcard replacement (4)
+            module_lines.append(line[2:])
+        elif not line.startswith("##"):
+            # at this point, the line must be a marker, otherwise we don't know what it is
+            raise InvalidFileFormat(f"vendor/modules.txt: unexpected format: {line!r}")
+
+    return list(filter(has_packages.get, module_lines))
+
+
+def _vendor_deps(run_params: dict, can_make_changes: bool, git_dir: str):
+    """
+    Vendor golang dependencies.
+
+    If Cachito is not allowed to make changes, it will verify that the vendor directory already
+    contained the correct content.
+
+    :param run_params: common params for the subprocess calls to `go`
+    :param can_make_changes: is Cachito allowed to make changes?
+    :param git_dir: path to the repository root
+    :raise ValidationError: if vendor directory changed and Cachito is not allowed to make changes
+    """
+    log.info("Vendoring the gomod dependencies")
+    _run_download_cmd(("go", "mod", "vendor"), run_params)
+    app_dir = run_params["cwd"]
+    if not can_make_changes and _vendor_changed(git_dir, app_dir):
+        raise ValidationError(
+            "The content of the vendor directory is not consistent with go.mod. Run "
+            "`go mod vendor` locally to fix this problem. See the logs for more details."
+        )
+
+def _run_download_cmd(cmd: Iterable[str], params: Dict[str, str]) -> str:
+    """Run gomod command that downloads dependencies.
+
+    Such commands may fail due to network errors (go is bad at retrying), so the entire operation
+    will be retried a configurable number of times.
+
+    Cachito will reuse the same cache directory between retries, so Go will not have to download
+    the same dependency twice. The backoff is exponential, Cachito will wait 1s -> 2s -> 4s -> ...
+    before retrying.
+    """
+    n_tries = get_worker_config().cachito_gomod_download_max_tries
+
+    @backoff.on_exception(
+        backoff.expo,
+        CachitoCalledProcessError,
+        jitter=None,  # use deterministic backoff, do not apply jitter
+        max_tries=n_tries,
+        logger=log,
+    )
+    def run_go(_cmd, _params) -> str:
+        log.debug(f"Running {_cmd}")
+        return _run_gomod_cmd(_cmd, _params)
+
+    try:
+        return run_go(cmd, params)
+    except CachitoCalledProcessError:
+        err_msg = (
+            f"Processing gomod dependencies failed. Cachito tried the {' '.join(cmd)} command "
+            f"{n_tries} times. This may indicate a problem with your repository or Cachito itself."
+        )
+        raise GoModError(err_msg)
+
+
+def _fail_unless_allowed(module_name: str, package_name: str, allowed_patterns: List[str]):
+    """
+    Fail unless the module is allowed to replace the package with a local dependency.
+
+    When packages are allowed to be replaced:
+    * package_name is a submodule of module_name
+    * package_name replacement is allowed according to allowed_patterns
+    """
+    versionless_module_name = _MODULE_VERSION_RE.sub("", module_name)
+    is_submodule = _contains_package(versionless_module_name, package_name)
+    if not is_submodule and not any(fnmatch.fnmatch(package_name, pat) for pat in allowed_patterns):
+        raise UnsupportedFeature(
+            f"The module {module_name} is not allowed to replace {package_name} with a local "
+            f"dependency. Please contact the maintainers of this Cachito instance about adding "
+            "an exception."
+        )
+
+
+def _match_parent_module(package_name: str, module_names: Iterable[str]) -> Optional[str]:
+    """
+    Find parent module for package in iterable of module names.
+
+    Picks the longest module name that matches the package name
+    (the package name must start with the module name).
+
+    :param package_name: name of package
+    :param module_names: iterable of module names
+    :return: longest matching module name or None (no module matches)
+    """
+    contains_this_package = functools.partial(_contains_package, package_name=package_name)
+    return max(
+        filter(contains_this_package, module_names),
+        key=len,  # type: ignore
+        default=None,
+    )
+
+
+def _vendor_changed(git_dir: str, app_dir: str) -> bool:
+    """Check for changes in the vendor directory."""
+    vendor = Path(app_dir).relative_to(git_dir).joinpath("vendor")
+    modules_txt = vendor / "modules.txt"
+
+    repo = git.Repo(git_dir)
+    # Add untracked files but do not stage them
+    repo.git.add("--intent-to-add", "--force", "--", app_dir)
+
+    try:
+        # Diffing modules.txt should catch most issues and produce relatively useful output
+        modules_txt_diff = repo.git.diff("--", str(modules_txt))
+        if modules_txt_diff:
+            log.error("%s changed after vendoring:\n%s", modules_txt, modules_txt_diff)
+            return True
+
+        # Show only if files were added/deleted/modified, not the full diff
+        vendor_diff = repo.git.diff("--name-status", "--", str(vendor))
+        if vendor_diff:
+            log.error("%s directory changed after vendoring:\n%s", vendor, vendor_diff)
+            return True
+    finally:
+        repo.git.reset("--", app_dir)
+
+    return False

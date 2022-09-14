@@ -1,5 +1,3 @@
-import os
-
 config = None
 
 class Config:
@@ -15,6 +13,7 @@ class Config:
             "SKIP_SASS_BINARY_DOWNLOAD_FOR_CI": {"value": "true", "kind": "literal"},
         },
     }
+    cachito_gomod_ignore_missing_gomod_file = False
     cachito_gomod_download_max_tries = 5
     cachito_gomod_file_deps_allowlist = {}
     cachito_gomod_strict_vendor = False
